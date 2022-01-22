@@ -23,7 +23,9 @@ library(here)
 
 \newpage
 
-GitHub repository link: https://github.com/joshsia/covid-socioeconomics
+**GitHub repository link:** https://github.com/joshsia/covid-socioeconomics
+
+**PDF file link:** https://github.com/joshsia/covid-socioeconomics/blob/main/covid-socioeconomics-report.pdf
 
 # Audience persona
 
