@@ -1,0 +1,204 @@
+---
+title: "How does COVID-19 prevalence relate to socioeconomic features?"
+author: "Joshua Sia"
+bibliography: covid-socioeconomics.bib
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+csl: harvard-cite-them-right.csl
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(knitr)
+library(docopt)
+library(tidyverse)
+library(plotly)
+library(broom)
+library(testthat)
+library(here)
+```
+
+\newpage
+
+GitHub repository link: https://github.com/joshsia/covid-socioeconomics
+
+# Audience persona
+
+Daniel is a second-year undergraduate data science student who has mostly been taking statistics classes and has just learned about statistical modelling in R. He is familiar with regression and how to assess a model's performance, but has never worked on a data science project personally. He is interested in what data science workflows look like but not the specific code required to perform data analyses. Daniel lives in the US and the increasing number of COVID-19 cases makes him curious about the socioeconomic factors that might be associated with COVID-19 prevalence.
+
+# Abstract
+
+COVID-19 is a serious pandemic that has introduced a wide variety of challenges since 2019. Its high transmission rate makes it difficult to control the spread of the virus and furthermore, symptoms may manifest in patients after a few days, or not manifest at all which makes it difficult for individuals to identify whether they need to self-isolate to slow down the spread of the virus. This project builds a multiple linear regression model with interaction terms to study the association of socioeconomic features with COVID-19 prevalence in the United States. By analysing the relationship between the number of COVID-19 cases and socioeconomic features of a state, factors that influence COVID-19 prevalence can be identified which could help policymakers and leaders make more informed decisions in combating COVID-19. The linear regression model with interaction terms resulted in an R-squared score of 0.67. A t-test was performed for each socioeconomic feature at the 0.1 significance level. It was found that the income ratio, the interaction between percentage of smokers and percentage of sick people, and a few other features were significantly associated with COVID-19 prevalence. Knowing aspects of a state that are associated with COVID-19 prevalence can help governments make decisions on where to allocate the state budget to attempt to reduce the number of COVID-19 cases and ultimately, to keep the state safe.
+
+\newpage
+
+# Introduction
+
+With the recent COVID-19 pandemic, many states in the US have seen an increasing number of COVID-19 cases and associated mortailty numbers [@oster2020trends][@ihme2020modeling]. However, controlling the spread of the virus is not simple due to its high transmission rate and furthermore, symptoms may manifest in patients after a few days, or not manifest at all which makes it difficult for individuals to identify whether they need to self-isolate to slow down the spread of the virus [@christie2021guidance][@velavan2020covid].
+
+Numerous studies have been conducted on the biology of COVID-19 such as its immunopathology [@cao2020covid], pathophysiology [@yuki2020covid] and vaccine development and efficacy [@andreadakis2020covid]. However, there are fewer papers published on the influence of socioeconomic features on COVID-19 prevalence. Previous studies have analysed the association of socioeconomics with COVID-19 prevalence across multiple countries [@chaudhry2020country], and the association of race, age, proportion of genders for different zip codes in the United States [@guha2020community]. However, since there are many different ways to measure attributes of a state or country, there are still many socioeconomic factors which remain to be analysed. In addition, studying the relationship between COVID-19 prevalence and socioeconomics also has implications for fairness since the analysis may also help communities uncover underlying biases that exist in a particular area.
+
+Thus, this project aims to analyse the relationship between COVID-19 prevalence, defined as the cumulative total number of COVID-19 cases per 100,000 people, and the percentage of smokers, income ratio, percentage of sick people, percentage of unemployed people, and the teen birth rates in the US using a simple and interpretable model.
+
+# Methods
+
+## Data
+
+The original data set used in this project is of US socioeconomic features by county created by Dr. John Davis at Indiana University, the United States [@davis_2020]. Each row in the original data set corresponds to a date for each US county along with the new number of COVID-19 cases and socioeconomic features of the particular county. There are over 790,000 rows and over 200 features in the original data set. An arbitrary subset of features was chosen and wildcard features such as the teen birth rate and percentage of unemployed people were also selected which might be related to broader social determinants of public health.
+
+The data set reports time series data per county for new number of COVID-19 cases and different socioeconomic features. However, due to difficulties in measurements and reporting, COVID-19 cases and socioeconomic features were updated at irregular intervals (e.g. COVID-19 cases were reported daily, whereas the socioeconomic features were reported no more than once a month). Thus, the time series data was condensed into summary statistics, specifically, the mean was calculated for socioeconomic features for each county, and the number of COVID-19 cases were summed. All missing values were removed during data wrangling since they did not account for a large proportion of the data set (< 2%). The processed data set contains 51 rows corresponding to each US state, 1 column for COVID-19 prevalence, and 5 columns for different socioeconomic features.
+
+The data set used does not involve data about individuals, hence it is not sensitive, and can be found publicly on [Kaggle](https://www.kaggle.com/johnjdavisiv/us-counties-covid19-weather-sociohealth-data). This data set is also used only for educational purposes in this project.
+
+```{r read in data}
+covid_df <- read_csv("data/clean-covid-data.csv", show_col_types = FALSE)
+
+model_features <- c(
+    "percent_smokers", "income_ratio", "percent_fair_or_poor_health",
+    "percent_unemployed_CHR", "teen_birth_rate")
+
+response <- "cases_per_100k"
+
+covid_df <- covid_df |>
+  select(c("state", "county", all_of(response), all_of(model_features))) |>
+  group_by(state) |>
+  summarise(cases_per_100k = mean(cases_per_100k),
+            percent_smokers = mean(percent_smokers),
+            income_ratio = mean(income_ratio),
+            percent_sick = mean(percent_fair_or_poor_health),
+            percent_unemployed = mean(percent_unemployed_CHR),
+            teen_birth_rate = mean(teen_birth_rate)) |>
+  select(-c("state"))
+
+model_features <- c(
+    "percent_smokers", "income_ratio", "percent_sick",
+    "percent_unemployed", "teen_birth_rate")
+```
+## EDA
+
+First, the empirical distribution of the number of COVID-19 cases per 100,000 was plotted as a histogram. There appears to be some observations with a very low proportion of COVID-19 cases, however, the number of COVID-19 cases per 100,000 seems to follow a normal distribution.
+
+```{r eda-1, fig.width = 5, fig.height = 2, fig.align = "center"}
+covid_df |>
+  ggplot(aes(x = cases_per_100k)) +
+  geom_histogram(color = "white", bins = 15) +
+  scale_x_continuous(labels = scales::label_number_si()) +
+  labs(x = "COVID-19 cases per 100,000", y = "Count",
+       title = "Distribution of COVID-19 prevalence") +
+  theme_bw() +
+  theme(text = element_text(size = 12))
+```
+
+Next, the relationship between COVID-19 prevalence and socioeconomic features were shown as a scatterplot. A linear regression line is also shown in blue to give early hints about their association. The linear relationships do not appear strong individually, however, this could be because each feature is observed in isolation. There might be interactions between these features which can have a linear relationship with COVID-19 prevalence.
+
+```{r eda-2, fig.width = 7, fig.height = 4, fig.align = "center"}
+covid_df |>
+  pivot_longer(-c(cases_per_100k)) |>
+  ggplot(aes(x = value, y = cases_per_100k)) +
+  geom_point(size = 0.3, alpha = 0.7) +
+  geom_smooth(formula = "y ~ x", se = FALSE, method = "lm", size = 0.5) +
+  labs(x = "", y = "COVID-19 cases per 100,000",
+       title = "Relationship between COVID-19 prevalence and predictors") +
+  scale_y_continuous(labels = scales::label_number_si()) +
+  scale_x_continuous(labels = scales::label_number_si()) +
+  facet_wrap(~name, scales = "free_x") +
+  theme_bw() +
+  theme(text = element_text(size = 12))
+```
+
+## Model fitting
+
+The response, COVID-19 cases per 100,000, appears to follow a normal distribution and there seems to be a linear relationship between the response and the explanatory variables. Thus, a multiple linear regression (MLR) model is selected. Another advantage of the MLR is that it is simple, easily interpretable and fast. The baseline model is an MLR with only additive terms and the full model is an MLR with interaction terms. Interaction terms were included in the model to account for non-linear relationships between COVID-19 prevalence and socioeconomic features. Both models are fitted using the `lm` function from the `stats` package in `R` and compared below. Code used to perform the analysis and create this report can be found [here](https://github.com/joshsia/covid-socioeconomics).
+
+In order to make interpretation of regression coefficients easier, scaling of the features was also performed such that features have a mean of zero, and a standard deviation of 1.
+
+```{r standardise features}
+standardised_data <- covid_df |>
+  mutate_at(model_features, ~(scale(.) %>% as.vector))
+```
+
+```{r model fitting}
+model_add <- lm(cases_per_100k ~ ., data = standardised_data)
+model_int <- lm(cases_per_100k ~ . * ., data = standardised_data)
+```
+
+# Results
+
+## Model selection
+
+Model selection tools such as the adjusted $R^2$ value, the AIC and BIC are looked at for both models. The adjusted $R^2$ and the AIC favour the full model with interaction terms while the BIC favours the baseline model slightly more. This is likely because the BIC penalises an increase in model complexity more heavily than the AIC.
+
+```{r info crit}
+kable(data.frame(
+  Model = c("Baseline", "Full"),
+  `Adjusted_R_squared` = c(glance(model_add)$adj.r.squared,
+                           glance(model_int)$adj.r.squared),
+  AIC = c(glance(model_add)$AIC, glance(model_int)$AIC),
+  BIC = c(glance(model_add)$BIC, glance(model_int)$BIC)
+) |>
+  mutate_if(is.numeric, round, 2),
+col.names = c("Model", "Adjusted R squared", "AIC", "BIC"),
+align = "lccc")
+```
+
+```{r model selection}
+# anova(model_add, model_int)
+f_test <- signif(anova(model_add, model_int)[2, 6], 2)
+```
+
+An F-test was carried out to determine whether the full model with interaction terms fits the data significantly better than the baseline model using the `anova` function from the `stats` package in `R`. The p-value associated with the F-statistic was `r f_test` which is smaller than $\alpha = 0.05$. Thus, the full model with interaction terms is selected.
+
+```{r}
+r_squared <- glance(model_int)$r.squared
+```
+
+The full model with interaction terms had an $R^2$ score of `r round(r_squared, 3)` which implies that `r round(r_squared*100, 1)`% of the variance in the data was explained by the model. This is a moderate score which suggests that the features used in the model may not be the best at explaining the data, or an MLR model may not be the best to model the data.
+
+## Model coefficients
+
+Out of 16 regression coefficients in the full model, only 5 coefficients are significant at the $\alpha = 0.1$ significance level. Interestingly, most of the significant coefficients are interaction terms.
+
+```{r}
+kable(model_int |> 
+  tidy() |>
+  select(term, estimate, p.value) |>
+  arrange(p.value) |>
+  filter(p.value < 0.1) |>
+  mutate_if(is.numeric, signif, 3),
+  col.names = c("Term", "Estimate", "p-value"),
+  align = "lccc"
+  )
+```
+
+The significant coefficients along with their 95% confidence intervals are plotted as error bars.
+
+```{r, fig.width = 6, fig.height = 2, fig.align = "center"}
+model_int |>
+  tidy(conf.int = TRUE) |>
+  filter(p.value < 0.1) |>
+  arrange(desc(estimate)) |>
+  ggplot(aes(x = estimate, y = factor(term, levels = term))) +
+  geom_point() +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
+    labs(x = "Coefficient",
+         y = "") +
+    theme_bw() +
+    theme(text = element_text(size = 12))
+```
+
+# Conclusion
+
+Using a multiple linear regression model with interaction terms, the socioeconomic features found to be significantly associated with COVID-19 prevalence are the income ratio, the interaction between income ratio and percentage of unemployed people, the interaction between income ratio and percentage of sick people, and the interaction between percentage of smokers and sick people. 
+
+Interestingly, the interaction between percentage of smokers and sick people is negatively associated with COVID-19 prevalence. One possible reason is that smokers are not more susceptible to contracting COVID-19 than non-smokers or smokers are more cautious about COVID-19 and tend to stay at home more than non-smokers since COVID-19 is a pulmonary virus which affects the lungs.
+
+Furthermore, the income ratio is also negatively associated with COVID-19 prevalence, however, there is a high leverage point in the data. It is worth exploring what state this point corresponds to, and to check whether there has been a mistake in the data collection process.
+
+It is important to note that the results of the full model should be taken with caution since the model resulted in a moderate $R^2$ score of 0.67. This suggests that the features chosen in this project are not the most informative at explaining COVID-19 prevalence or an MLR may not be best to model the data. Non-linear models can also be fitted and compared to the MLR models to see whether they fit the data better.
+
+The original data set involved more than 200 features and only 5 were selected for analysis in this project due to time constraints. In the future, it would be interesting to explore how other socioeconomic features are associated with COVID-19 prevalence.
+
+# References
